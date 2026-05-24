@@ -1,4 +1,4 @@
-import { type ClipboardEvent, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type ClipboardEvent, type KeyboardEvent, type PointerEvent, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { areas, buildRevisionPrompt, subjectRecords, subjects, type RecordArea, type Subject } from './data'
 
@@ -12,7 +12,6 @@ type RevisionMode = 'normal' | 'expand' | 'shrink'
 type ColumnKey = 'number' | 'name' | 'comment' | 'request' | 'aiAction' | 'result' | 'applyAction'
 type ColumnWidths = Record<ColumnKey, number>
 
-const STORAGE_KEY = 'student-record-ai-editor-openai-key'
 const areaLabels: Record<RecordArea, string> = {
   '교과 특기사항': '교과학습발달',
   창체: '창체',
@@ -82,18 +81,6 @@ const revisionModeRequests: Record<RevisionMode, string> = {
   shrink: '기존 평어의 핵심 내용과 문체는 유지하되 글자수를 현재보다 약 70% 수준으로 자연스럽게 줄여 주세요. 중복 표현은 덜고 핵심만 남겨 주세요.',
 }
 
-function getKeyFromUrl() {
-  const params = new URLSearchParams(window.location.search)
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-  return params.get('openaiKey') || hashParams.get('openaiKey') || ''
-}
-
-function cleanKeyFromUrl() {
-  if (!window.location.search.includes('openaiKey') && !window.location.hash.includes('openaiKey')) return
-  const cleanUrl = `${window.location.origin}${window.location.pathname}`
-  window.history.replaceState({}, document.title, cleanUrl)
-}
-
 function createEmptyState(): DraftState {
   return areas.reduce((acc, area) => {
     acc[area] = subjects.reduce((subjectAcc, subject) => {
@@ -137,35 +124,21 @@ function createEmptyHistory(): HistoryState {
   }, {} as HistoryState)
 }
 
-async function reviseWithOpenAI(apiKey: string, prompt: string) {
-  const response = await fetch('https://api.openai.com/v1/responses', {
+async function reviseComment(prompt: string) {
+  const response = await fetch('/api/revise', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4.1-mini',
-      input: prompt,
-      temperature: 0.35,
-      max_output_tokens: 220,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
   })
 
+  const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `OpenAI API 오류: ${response.status}`)
+    throw new Error(data.error || `요청 오류: ${response.status}`)
   }
-
-  const data = await response.json()
-  if (typeof data.output_text === 'string' && data.output_text.trim()) {
-    return data.output_text.trim()
+  if (typeof data.text === 'string' && data.text.trim()) {
+    return data.text.trim()
   }
-
-  const content = data.output?.[0]?.content?.find((item: { text?: string }) => item.text)?.text
-  if (typeof content === 'string' && content.trim()) return content.trim()
-
-  throw new Error('AI 응답에서 수정 문구를 찾지 못했습니다.')
+  throw new Error(data.error || 'AI 응답에서 수정 문구를 찾지 못했습니다.')
 }
 
 function App() {
@@ -177,8 +150,6 @@ function App() {
   const [history, setHistory] = useState<HistoryState>(() => createEmptyHistory())
   const [historyRow, setHistoryRow] = useState<number | null>(null)
   const [rowStatus, setRowStatus] = useState<RowStatus>({})
-  const [apiKey, setApiKey] = useState(() => getKeyFromUrl() || localStorage.getItem(STORAGE_KEY) || '')
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>(initialColumnWidths)
   const [toast, setToast] = useState<string | null>(null)
@@ -195,15 +166,6 @@ function App() {
 
   const rows = useMemo(() => subjectRecords[activeArea][activeSubject], [activeArea, activeSubject])
 
-  useEffect(() => {
-    if (apiKey.trim()) localStorage.setItem(STORAGE_KEY, apiKey.trim())
-    else localStorage.removeItem(STORAGE_KEY)
-  }, [apiKey])
-
-  useEffect(() => {
-    cleanKeyFromUrl()
-  }, [])
-
   const updateDraft = (studentNo: number, value: string) => {
     setDrafts((prev) => ({
       ...prev,
@@ -218,11 +180,6 @@ function App() {
   }
 
   const reviseSingleRow = async (studentNo: number, mode: RevisionMode = 'normal') => {
-    if (!apiKey.trim()) {
-      setSettingsOpen(true)
-      return
-    }
-
     const row = rows.find((item) => item.studentNo === studentNo)
     if (!row) return
     setRowStatus((prev) => ({ ...prev, [row.studentNo]: 'loading' }))
@@ -237,7 +194,7 @@ function App() {
         originalComment: comments[activeArea][activeSubject][row.studentNo] ?? row.comment,
         editRequest,
       })
-      const revised = await reviseWithOpenAI(apiKey.trim(), prompt)
+      const revised = await reviseComment(prompt)
       setResults((prev) => ({
         ...prev,
         [activeArea]: {
@@ -265,11 +222,6 @@ function App() {
   }
 
   const runAiRevision = async (mode: RevisionMode = 'normal') => {
-    if (!apiKey.trim()) {
-      setSettingsOpen(true)
-      return
-    }
-
     setIsRunning(true)
     setRowStatus(Object.fromEntries(rows.map((row) => [row.studentNo, 'loading'])))
 
@@ -287,7 +239,7 @@ function App() {
           originalComment: comments[activeArea][activeSubject][row.studentNo] ?? row.comment,
           editRequest,
         })
-        nextResults[row.studentNo] = await reviseWithOpenAI(apiKey.trim(), prompt)
+        nextResults[row.studentNo] = await reviseComment(prompt)
         nextStatus[row.studentNo] = 'done'
       } catch (error) {
         nextResults[row.studentNo] = error instanceof Error ? `오류: ${error.message.slice(0, 140)}` : '오류가 발생했습니다.'
@@ -645,12 +597,6 @@ function App() {
           <button type="button" className="bulk-action-button subtle-action" onClick={() => runAiRevision('shrink')} disabled={isRunning}>모두 글자수 줄이기</button>
           <button type="button" className="bulk-action-button" onClick={applyAllResults}>모두 반영</button>
           <button type="button" className="ghost-button auto-send-button" onClick={sendToAutoInput}>자동입력으로 보내기</button>
-          <button className="settings-button icon-only-settings workbar-settings" type="button" onClick={() => setSettingsOpen(true)} aria-label="OpenAI API 키 설정">
-            <svg className="gear-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M19.4 13.5c.08-.49.1-.99.06-1.5.04-.51.02-1.01-.06-1.5l2.05-1.58-1.95-3.38-2.42.98a7.9 7.9 0 0 0-2.6-1.5L14.12 2h-4.24l-.36 3.02a7.9 7.9 0 0 0-2.6 1.5l-2.42-.98-1.95 3.38L4.6 10.5a9.6 9.6 0 0 0-.06 1.5c-.04.51-.02 1.01.06 1.5l-2.05 1.58 1.95 3.38 2.42-.98a7.9 7.9 0 0 0 2.6 1.5l.36 3.02h4.24l.36-3.02a7.9 7.9 0 0 0 2.6-1.5l2.42.98 1.95-3.38-2.05-1.58ZM12 15.4a3.4 3.4 0 1 1 0-6.8 3.4 3.4 0 0 1 0 6.8Z" />
-            </svg>
-            <span className="visually-hidden">API 키 설정</span>
-          </button>
         </div>
       </section>
 
@@ -784,33 +730,6 @@ function App() {
         </div>
       )}
 
-      {settingsOpen && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
-          <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <p className="eyebrow">Settings</p>
-                <h2 id="settings-title">OpenAI API 키 설정</h2>
-              </div>
-              <button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="닫기">×</button>
-            </div>
-            <label className="api-label" htmlFor="api-key">API Key</label>
-            <input
-              id="api-key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="sk-..."
-              autoComplete="off"
-            />
-            <p className="helper-text">키는 이 브라우저의 localStorage에만 저장됩니다. 공개/공용 PC에서는 사용 후 삭제해 주세요.</p>
-            <div className="modal-actions">
-              <button type="button" className="ghost-button" onClick={() => setApiKey('')}>키 삭제</button>
-              <button type="button" className="primary-button" onClick={() => setSettingsOpen(false)}>저장</button>
-            </div>
-          </section>
-        </div>
-      )}
 
       {sentNoticeOpen && (
         <div className="modal-backdrop" role="presentation" onClick={() => setSentNoticeOpen(false)}>

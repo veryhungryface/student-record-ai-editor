@@ -56,7 +56,7 @@ describe('App AI revision controls', () => {
     localStorage.setItem('student-record-ai-editor-openai-key', 'sk-test')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ output_text: '수정된 평어 문구가 자연스럽게 반영됨.' }),
+      json: async () => ({ text: '수정된 평어 문구가 자연스럽게 반영됨.' }),
     }))
 
     render(<App />)
