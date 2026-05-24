@@ -1,4 +1,4 @@
-import { type ClipboardEvent, type KeyboardEvent, type PointerEvent, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ClipboardEvent, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { areas, buildRevisionPrompt, subjectRecords, subjects, type RecordArea, type Subject } from './data'
 
@@ -11,6 +11,20 @@ type RowStatus = Record<number, 'idle' | 'loading' | 'done' | 'error'>
 type RevisionMode = 'normal' | 'expand' | 'shrink'
 type ColumnKey = 'number' | 'name' | 'comment' | 'request' | 'aiAction' | 'result' | 'applyAction'
 type ColumnWidths = Record<ColumnKey, number>
+type AbsorbAnimation = {
+  id: number
+  studentNo: number
+  text: string
+  style: CSSProperties & Record<string, string>
+}
+type PendingApply = {
+  studentNo: number
+  revised: string
+  currentComment: string
+}
+
+const ABSORB_DURATION_MS = 620
+const ABSORB_STAGGER_MS = 45
 
 const areaLabels: Record<RecordArea, string> = {
   '교과 특기사항': '교과학습발달',
@@ -56,12 +70,12 @@ function normalizeComment(text: string): string {
 }
 
 const initialColumnWidths: ColumnWidths = {
-  number: 42,
-  name: 74,
-  comment: 550,
-  request: 420,
-  aiAction: 94,
-  result: 338,
+  number: 72,
+  name: 92,
+  comment: 340,
+  request: 322,
+  aiAction: 118,
+  result: 290,
   applyAction: 86,
 }
 
@@ -157,6 +171,18 @@ function App() {
   const [installNoticeOpen, setInstallNoticeOpen] = useState(false)
   const [sentNoticeOpen, setSentNoticeOpen] = useState(false)
   const [sentCount, setSentCount] = useState(0)
+  const [isAreaMenuOpen, setIsAreaMenuOpen] = useState(false)
+  const [isSubjectMenuOpen, setIsSubjectMenuOpen] = useState(false)
+  const [absorbingRows, setAbsorbingRows] = useState<Record<number, boolean>>({})
+  const [absorbAnimations, setAbsorbAnimations] = useState<AbsorbAnimation[]>([])
+  const commentRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const resultRefs = useRef<Record<number, HTMLTableCellElement | null>>({})
+  const absorbTimerRefs = useRef<Record<number, number>>({})
+  const absorbAnimationCounter = useRef(0)
+
+  useEffect(() => () => {
+    Object.values(absorbTimerRefs.current).forEach((timer) => window.clearTimeout(timer))
+  }, [])
 
   const showToast = (message: string) => {
     setToast(message)
@@ -280,70 +306,23 @@ function App() {
     }))
   }
 
-  const applyResult = (studentNo: number) => {
-    const revised = results[activeArea][activeSubject][studentNo]
-    if (!revised || revised.startsWith('오류:')) {
-      return
-    }
-
-    const currentComment = comments[activeArea][activeSubject][studentNo] ?? ''
-    setHistory((prev) => ({
-      ...prev,
-      [activeArea]: {
-        ...prev[activeArea],
-        [activeSubject]: {
-          ...prev[activeArea][activeSubject],
-          [studentNo]: [...(prev[activeArea][activeSubject][studentNo] ?? []), currentComment],
-        },
-      },
-    }))
-    setComments((prev) => ({
-      ...prev,
-      [activeArea]: {
-        ...prev[activeArea],
-        [activeSubject]: {
-          ...prev[activeArea][activeSubject],
-          [studentNo]: revised,
-        },
-      },
-    }))
-    setResults((prev) => {
-      const nextSubjectResults = { ...prev[activeArea][activeSubject] }
-      delete nextSubjectResults[studentNo]
-      return {
-        ...prev,
-        [activeArea]: {
-          ...prev[activeArea],
-          [activeSubject]: nextSubjectResults,
-        },
-      }
-    })
-    setRowStatus((prev) => ({ ...prev, [studentNo]: 'idle' }))
-  }
-
-  const applyAllResults = () => {
-    const applicableRows = rows.filter((row) => {
-      const revised = results[activeArea][activeSubject][row.studentNo]
-      return revised && !revised.startsWith('오류:')
-    })
-
-    if (!applicableRows.length) {
-      return
-    }
+  const commitAppliedResults = (
+    targetArea: RecordArea,
+    targetSubject: Subject,
+    appliedRows: PendingApply[],
+  ) => {
+    if (!appliedRows.length) return
 
     setHistory((prev) => ({
       ...prev,
-      [activeArea]: {
-        ...prev[activeArea],
-        [activeSubject]: {
-          ...prev[activeArea][activeSubject],
+      [targetArea]: {
+        ...prev[targetArea],
+        [targetSubject]: {
+          ...prev[targetArea][targetSubject],
           ...Object.fromEntries(
-            applicableRows.map((row) => [
-              row.studentNo,
-              [
-                ...(prev[activeArea][activeSubject][row.studentNo] ?? []),
-                comments[activeArea][activeSubject][row.studentNo] ?? '',
-              ],
+            appliedRows.map(({ studentNo, currentComment }) => [
+              studentNo,
+              [...(prev[targetArea][targetSubject][studentNo] ?? []), currentComment],
             ]),
           ),
         },
@@ -351,31 +330,148 @@ function App() {
     }))
     setComments((prev) => ({
       ...prev,
-      [activeArea]: {
-        ...prev[activeArea],
-        [activeSubject]: {
-          ...prev[activeArea][activeSubject],
-          ...Object.fromEntries(applicableRows.map((row) => [row.studentNo, results[activeArea][activeSubject][row.studentNo]])),
+      [targetArea]: {
+        ...prev[targetArea],
+        [targetSubject]: {
+          ...prev[targetArea][targetSubject],
+          ...Object.fromEntries(appliedRows.map(({ studentNo, revised }) => [studentNo, revised])),
         },
       },
     }))
     setResults((prev) => {
-      const nextSubjectResults = { ...prev[activeArea][activeSubject] }
-      applicableRows.forEach((row) => {
-        delete nextSubjectResults[row.studentNo]
+      const nextSubjectResults = { ...prev[targetArea][targetSubject] }
+      appliedRows.forEach(({ studentNo }) => {
+        delete nextSubjectResults[studentNo]
       })
       return {
         ...prev,
-        [activeArea]: {
-          ...prev[activeArea],
-          [activeSubject]: nextSubjectResults,
+        [targetArea]: {
+          ...prev[targetArea],
+          [targetSubject]: nextSubjectResults,
         },
       }
     })
     setRowStatus((prev) => ({
       ...prev,
-      ...Object.fromEntries(applicableRows.map((row) => [row.studentNo, 'idle' as const])),
+      ...Object.fromEntries(appliedRows.map(({ studentNo }) => [studentNo, 'idle' as const])),
     }))
+  }
+
+  const getAbsorbAnimation = (studentNo: number, text: string, delayMs = 0): AbsorbAnimation | null => {
+    const sourceRect = resultRefs.current[studentNo]?.getBoundingClientRect()
+    const targetRect = commentRefs.current[studentNo]?.getBoundingClientRect()
+    const prefersReducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const canAnimate = Boolean(
+      sourceRect &&
+      targetRect &&
+      sourceRect.width > 0 &&
+      sourceRect.height > 0 &&
+      targetRect.width > 0 &&
+      targetRect.height > 0 &&
+      !prefersReducedMotion,
+    )
+
+    if (!canAnimate || !sourceRect || !targetRect) return null
+
+    const animationId = absorbAnimationCounter.current + 1
+    absorbAnimationCounter.current = animationId
+    const sourceCenterX = sourceRect.left + sourceRect.width / 2
+    const sourceCenterY = sourceRect.top + sourceRect.height / 2
+    const targetCenterX = targetRect.left + targetRect.width / 2
+    const targetCenterY = targetRect.top + targetRect.height / 2
+
+    return {
+      id: animationId,
+      studentNo,
+      text,
+      style: {
+        left: `${sourceRect.left}px`,
+        top: `${sourceRect.top}px`,
+        width: `${sourceRect.width}px`,
+        animationDelay: `${delayMs}ms`,
+        '--absorb-dx': `${targetCenterX - sourceCenterX}px`,
+        '--absorb-dy': `${targetCenterY - sourceCenterY}px`,
+      },
+    }
+  }
+
+  const animateAndCommitAppliedResults = (
+    targetArea: RecordArea,
+    targetSubject: Subject,
+    appliedRows: PendingApply[],
+    animations: AbsorbAnimation[],
+  ) => {
+    const absorbingMap = Object.fromEntries(appliedRows.map(({ studentNo }) => [studentNo, true]))
+    const animationIds = animations.map((animation) => animation.id)
+    const commitDelay = ABSORB_DURATION_MS + Math.max(0, animations.length - 1) * ABSORB_STAGGER_MS
+    const timerKey = animationIds[0]
+
+    setAbsorbingRows((prev) => ({ ...prev, ...absorbingMap }))
+    setAbsorbAnimations((prev) => [...prev, ...animations])
+
+    absorbTimerRefs.current[timerKey] = window.setTimeout(() => {
+      commitAppliedResults(targetArea, targetSubject, appliedRows)
+      setAbsorbAnimations((prev) => prev.filter((animation) => !animationIds.includes(animation.id)))
+      setAbsorbingRows((prev) => {
+        const next = { ...prev }
+        appliedRows.forEach(({ studentNo }) => {
+          delete next[studentNo]
+        })
+        return next
+      })
+      delete absorbTimerRefs.current[timerKey]
+    }, commitDelay)
+  }
+
+  const applyResult = (studentNo: number) => {
+    if (absorbingRows[studentNo]) return
+
+    const targetArea = activeArea
+    const targetSubject = activeSubject
+    const revised = results[targetArea][targetSubject][studentNo]
+    if (!revised || revised.startsWith('오류:')) {
+      return
+    }
+
+    const currentComment = comments[targetArea][targetSubject][studentNo] ?? ''
+    const appliedRows = [{ studentNo, revised, currentComment }]
+    const animation = getAbsorbAnimation(studentNo, revised)
+
+    if (!animation) {
+      commitAppliedResults(targetArea, targetSubject, appliedRows)
+      return
+    }
+
+    animateAndCommitAppliedResults(targetArea, targetSubject, appliedRows, [animation])
+  }
+
+  const applyAllResults = () => {
+    const applicableRows = rows.filter((row) => {
+      const revised = results[activeArea][activeSubject][row.studentNo]
+      return revised && !revised.startsWith('오류:') && !absorbingRows[row.studentNo]
+    })
+
+    if (!applicableRows.length) {
+      return
+    }
+
+    const targetArea = activeArea
+    const targetSubject = activeSubject
+    const appliedRows = applicableRows.map((row) => ({
+      studentNo: row.studentNo,
+      revised: results[targetArea][targetSubject][row.studentNo],
+      currentComment: comments[targetArea][targetSubject][row.studentNo] ?? '',
+    }))
+    const animations = appliedRows
+      .map(({ studentNo, revised }, index) => getAbsorbAnimation(studentNo, revised, index * ABSORB_STAGGER_MS))
+      .filter((animation): animation is AbsorbAnimation => Boolean(animation))
+
+    if (animations.length !== appliedRows.length) {
+      commitAppliedResults(targetArea, targetSubject, appliedRows)
+      return
+    }
+
+    animateAndCommitAppliedResults(targetArea, targetSubject, appliedRows, animations)
   }
 
   const restoreComment = (studentNo: number, historyIndex: number) => {
@@ -479,6 +575,18 @@ function App() {
   const totalColumnWidth = Object.values(columnWidths).reduce((sum, width) => sum + width, 0)
   const getColumnWidth = (key: ColumnKey) => `${(columnWidths[key] / totalColumnWidth) * 100}%`
 
+  const selectArea = (nextArea: RecordArea) => {
+    setActiveArea(nextArea)
+    setRowStatus({})
+    setIsAreaMenuOpen(false)
+  }
+
+  const selectSubject = (nextSubject: Subject) => {
+    setActiveSubject(nextSubject)
+    setRowStatus({})
+    setIsSubjectMenuOpen(false)
+  }
+
   const renderHeader = (label: string, key: ColumnKey, className = '') => (
     <th className={className}>
       <span className="header-content">
@@ -549,54 +657,137 @@ function App() {
   return (
     <main className="app-shell">
       <section className="sticky-workbar" aria-label="작업 선택 및 일괄 실행">
-        <div className="workbar-field area-field">
-          <label htmlFor="area-select">기재 영역</label>
-          <select
-            id="area-select"
-            className="workbar-select"
-            value={activeArea}
-            onChange={(event) => {
-              const nextArea = event.target.value as RecordArea
-              setActiveArea(nextArea)
-              setRowStatus({})
-            }}
-          >
-            {areas.map((area) => (
-              <option key={area} value={area}>{areaLabels[area]}</option>
-            ))}
-          </select>
+        <div
+          className="workbar-field area-field area-dropdown"
+          onBlur={(event) => {
+            const nextFocus = event.relatedTarget as Node | null
+            if (!event.currentTarget.contains(nextFocus)) {
+              setIsAreaMenuOpen(false)
+            }
+          }}
+        >
+          <label id="area-select-label">기재 영역</label>
+          <div className="area-picker">
+            <button
+              id="area-select"
+              type="button"
+              className="workbar-select area-select-button"
+              role="combobox"
+              aria-controls="area-options"
+              aria-expanded={isAreaMenuOpen}
+              aria-haspopup="listbox"
+              aria-labelledby="area-select-label area-select"
+              onClick={() => setIsAreaMenuOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setIsAreaMenuOpen(false)
+                } else if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setIsAreaMenuOpen(true)
+                }
+              }}
+            >
+              <span className="area-select-value">{areaLabels[activeArea]}</span>
+              <span className="area-select-chevron" aria-hidden="true" />
+            </button>
+
+            <div
+              id="area-options"
+              className="area-options"
+              role="listbox"
+              aria-labelledby="area-select-label"
+              hidden={!isAreaMenuOpen}
+            >
+              {areas.map((area) => (
+                <button
+                  key={area}
+                  type="button"
+                  className={`area-option${activeArea === area ? ' is-selected' : ''}`}
+                  role="option"
+                  aria-selected={activeArea === area}
+                  onClick={() => selectArea(area)}
+                >
+                  <span>{areaLabels[area]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {activeArea === '교과 특기사항' && (
-          <div className="workbar-field subject-field">
-            <span>과목</span>
-            <div className="subject-tabs compact-subject-tabs" aria-label="과목 선택">
-              {subjects.map((subject) => (
-                <button
-                  className={subject === activeSubject ? 'subject-tab active' : 'subject-tab'}
-                  key={subject}
-                  type="button"
-                  onClick={() => {
-                    setActiveSubject(subject)
-                    setRowStatus({})
-                  }}
-                >
-                  {subject}
-                </button>
-              ))}
+          <div
+            className="workbar-field subject-field subject-dropdown"
+            onBlur={(event) => {
+              const nextFocus = event.relatedTarget as Node | null
+              if (!event.currentTarget.contains(nextFocus)) {
+                setIsSubjectMenuOpen(false)
+              }
+            }}
+          >
+            <label id="subject-select-label">과목</label>
+            <div className="subject-picker">
+              <button
+                id="subject-select"
+                type="button"
+                className="workbar-select subject-select-button"
+                role="combobox"
+                aria-controls="subject-options"
+                aria-expanded={isSubjectMenuOpen}
+                aria-haspopup="listbox"
+                aria-labelledby="subject-select-label subject-select"
+                onClick={() => setIsSubjectMenuOpen((open) => !open)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setIsSubjectMenuOpen(false)
+                  } else if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    setIsSubjectMenuOpen(true)
+                  }
+                }}
+              >
+                <span className="subject-select-value">{activeSubject}</span>
+                <span className="subject-select-chevron" aria-hidden="true" />
+              </button>
+
+              <div
+                id="subject-options"
+                className="subject-options"
+                role="listbox"
+                aria-labelledby="subject-select-label"
+                hidden={!isSubjectMenuOpen}
+              >
+                {subjects.map((subject) => (
+                  <button
+                    key={subject}
+                    type="button"
+                    className={`subject-option${activeSubject === subject ? ' is-selected' : ''}`}
+                    role="option"
+                    aria-selected={activeSubject === subject}
+                    onClick={() => selectSubject(subject)}
+                  >
+                    <span>{subject}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
         <div className="workbar-actions">
-          <button type="button" className="ghost-button sample-button" onClick={fillSampleRequests}>수정 요청 예시 채우기</button>
-          <button type="button" className="bulk-action-button" onClick={() => runAiRevision()} disabled={isRunning}>
-            {isRunning ? '전체 수정 중' : '모든 학생 AI 수정'}
+          <button type="button" className="ghost-button sample-button" onClick={fillSampleRequests}>예시 채우기</button>
+          <button
+            type="button"
+            className="bulk-action-button"
+            onClick={() => runAiRevision()}
+            disabled={isRunning}
+            aria-label="모든 학생 AI 수정"
+          >
+            {isRunning ? '수정 중' : '전체 AI 수정'}
           </button>
-          <button type="button" className="bulk-action-button subtle-action" onClick={() => runAiRevision('expand')} disabled={isRunning}>모두 글자수 늘리기</button>
-          <button type="button" className="bulk-action-button subtle-action" onClick={() => runAiRevision('shrink')} disabled={isRunning}>모두 글자수 줄이기</button>
+          <button type="button" className="bulk-action-button subtle-action" onClick={() => runAiRevision('expand')} disabled={isRunning}>전체 늘리기</button>
+          <button type="button" className="bulk-action-button subtle-action" onClick={() => runAiRevision('shrink')} disabled={isRunning}>전체 줄이기</button>
           <button type="button" className="bulk-action-button" onClick={applyAllResults}>모두 반영</button>
-          <button type="button" className="ghost-button auto-send-button" onClick={sendToAutoInput}>자동입력으로 보내기</button>
+          <button type="button" className="ghost-button auto-send-button" onClick={sendToAutoInput}>나이스입력도우미로 보내기</button>
         </div>
       </section>
 
@@ -630,7 +821,12 @@ function App() {
                   <td className="number-cell">{row.studentNo}</td>
                   <td className="name-cell">{row.name}</td>
                   <td className="comment-cell">
-                    <div className="comment-box">
+                    <div
+                      className={`comment-box${absorbingRows[row.studentNo] ? ' absorbing-target' : ''}`}
+                      ref={(node) => {
+                        commentRefs.current[row.studentNo] = node
+                      }}
+                    >
                       <p>{comments[activeArea][activeSubject][row.studentNo] ?? row.comment}</p>
                       <button
                         type="button"
@@ -685,7 +881,12 @@ function App() {
                       </div>
                     </div>
                   </td>
-                  <td className={`result-cell ${rowStatus[row.studentNo] ?? 'idle'}`}>
+                  <td
+                    className={`result-cell ${rowStatus[row.studentNo] ?? 'idle'}${absorbingRows[row.studentNo] ? ' absorbing-source' : ''}`}
+                    ref={(node) => {
+                      resultRefs.current[row.studentNo] = node
+                    }}
+                  >
                     <p>{rowStatus[row.studentNo] === 'loading' ? '수정 중...' : results[activeArea][activeSubject][row.studentNo] || ''}</p>
                   </td>
                   <td className="apply-action-cell">
@@ -693,7 +894,7 @@ function App() {
                       type="button"
                       className="apply-button"
                       onClick={() => applyResult(row.studentNo)}
-                      disabled={!results[activeArea][activeSubject][row.studentNo] || results[activeArea][activeSubject][row.studentNo]?.startsWith('오류:')}
+                      disabled={absorbingRows[row.studentNo] || !results[activeArea][activeSubject][row.studentNo] || results[activeArea][activeSubject][row.studentNo]?.startsWith('오류:')}
                     >
                       반영
                     </button>
@@ -704,6 +905,12 @@ function App() {
           </table>
         </div>
       </section>
+
+      {absorbAnimations.map((animation) => (
+        <div key={animation.id} className="absorb-flyer" style={animation.style} aria-hidden="true">
+          <span>{animation.text}</span>
+        </div>
+      ))}
 
       {historyRow !== null && (
         <div className="modal-backdrop" role="presentation" onClick={() => setHistoryRow(null)}>
@@ -758,7 +965,7 @@ function App() {
               </div>
               <button type="button" className="icon-button" onClick={() => setInstallNoticeOpen(false)} aria-label="닫기">×</button>
             </div>
-            <p className="helper-text">아직 확장 프로그램이 설치되지 않았어요. 아래 버튼을 눌러 설치한 뒤 다시 ‘자동입력으로 보내기’를 눌러 주세요.</p>
+            <p className="helper-text">아직 확장 프로그램이 설치되지 않았어요. 아래 버튼을 눌러 설치한 뒤 다시 ‘나이스입력도우미로 보내기’를 눌러 주세요.</p>
             <div className="modal-actions" style={{ justifyContent: 'center' }}>
               <a className="primary-button" href={NEISSHOT_INSTALL_URL} target="_blank" rel="noreferrer">설치하러 가기</a>
             </div>

@@ -1,5 +1,5 @@
 export const areas = ['교과 특기사항', '창체', '행동특성 및 종합의견'] as const
-export const subjects = ['국어', '영어', '수학', '과학', '사회'] as const
+export const subjects = ['국어', '수학', '사회', '과학', '영어', '도덕', '체육', '음악', '미술', '실과'] as const
 
 export type RecordArea = (typeof areas)[number]
 export type Subject = (typeof subjects)[number]
@@ -12,7 +12,7 @@ export type StudentRecord = {
 
 const names = ['김민준', '이서연', '박도윤', '최하린', '정지후', '강아윤', '조현우', '윤서아', '장민서', '임준호']
 
-const subjectComments: Record<Subject, string[]> = {
+const subjectComments: Partial<Record<Subject, string[]>> = {
   국어: [
     '글의 중심 내용을 정확히 파악하고 자신의 생각을 조리 있게 표현함.',
     '인물의 마음과 사건의 흐름을 이해하며 읽기 활동에 성실히 참여함.',
@@ -75,7 +75,7 @@ const subjectComments: Record<Subject, string[]> = {
   ],
 }
 
-const creativeComments: Record<Subject, string[]> = {
+const creativeComments: Partial<Record<Subject, string[]>> = {
   국어: [
     '독서 토론에서 의견을 차분히 듣고 자신의 경험을 연결하여 생각을 나눔.',
     '학급 문집 만들기 활동에서 맡은 글을 성실히 다듬고 친구의 표현을 존중함.',
@@ -138,7 +138,7 @@ const creativeComments: Record<Subject, string[]> = {
   ],
 }
 
-const behaviorComments: Record<Subject, string[]> = {
+const behaviorComments: Partial<Record<Subject, string[]>> = {
   국어: [
     '책임감 있게 학습 준비를 하며 친구의 생각을 존중하는 태도가 돋보임.',
     '차분한 말투로 의견을 나누고 학급 약속을 꾸준히 지키는 모습이 보임.',
@@ -201,18 +201,68 @@ const behaviorComments: Record<Subject, string[]> = {
   ],
 }
 
-const commentsByArea: Record<RecordArea, Record<Subject, string[]>> = {
+const commentsByArea: Record<RecordArea, Partial<Record<Subject, string[]>>> = {
   '교과 특기사항': subjectComments,
   창체: creativeComments,
   '행동특성 및 종합의견': behaviorComments,
 }
 
+const createDefaultComments = (area: RecordArea, subject: Subject) => {
+  if (area === '교과 특기사항') {
+    return [
+      `${subject} 수업에서 핵심 내용을 이해하고 활동 과정에 성실히 참여함.`,
+      `${subject} 학습 과제를 차분히 해결하며 자신의 생각을 알맞게 표현함.`,
+      `${subject} 활동에서 배운 내용을 생활 속 사례와 연결하여 설명함.`,
+      `${subject} 수업 중 친구의 의견을 듣고 협력적으로 과제를 수행함.`,
+      `${subject} 관련 활동에 꾸준히 참여하며 자신감을 높여 가는 모습이 보임.`,
+      `${subject} 학습 과정에서 궁금한 점을 질문하고 해결하려는 태도가 돋보임.`,
+      `${subject} 과제를 꼼꼼히 정리하고 배운 내용을 바탕으로 발표함.`,
+      `${subject} 활동에서 자신의 역할을 책임 있게 수행하며 성장을 보임.`,
+      `${subject} 수업 규칙을 지키고 배운 내용을 정확히 활용하려 노력함.`,
+      `${subject} 학습에 꾸준히 참여하며 기본 개념과 표현력이 안정적으로 향상됨.`,
+    ]
+  }
+
+  if (area === '창체') {
+    return [
+      `${subject} 관련 체험 활동에서 맡은 역할을 성실히 수행함.`,
+      `${subject} 주제 활동에 관심을 가지고 친구들과 의견을 나눔.`,
+      `${subject} 활동 준비 과정에서 자료를 정리하고 모둠 활동에 협력함.`,
+      `${subject} 연계 활동에서 규칙을 지키며 책임 있는 태도를 보임.`,
+      `${subject} 주제 나눔에서 자신의 생각을 차분히 표현하고 친구를 존중함.`,
+      `${subject} 활동 결과를 돌아보며 배운 점을 생활과 연결하려는 태도를 보임.`,
+      `${subject} 협동 활동에서 친구를 배려하고 공동 목표 달성에 기여함.`,
+      `${subject} 활동에 꾸준히 참여하며 긍정적인 자세와 책임감을 보임.`,
+      `${subject} 주제 탐색 과정에서 다양한 생각을 수용하고 실천 방법을 찾음.`,
+      `${subject} 활동을 통해 자신감을 기르고 공동체 활동에 성실히 참여함.`,
+    ]
+  }
+
+  return [
+    `${subject} 학습과 생활에서 성실한 태도를 보이며 맡은 일을 책임 있게 수행함.`,
+    `${subject} 활동 중 친구의 의견을 존중하고 협력적인 관계를 형성함.`,
+    `${subject} 과제에 꾸준히 참여하며 스스로 성장하려는 태도가 돋보임.`,
+    `${subject} 수업과 생활에서 규칙을 지키고 차분하게 행동함.`,
+    `${subject} 활동 과정에서 어려움을 만나도 포기하지 않고 해결하려 노력함.`,
+    `${subject} 관련 활동에서 배려와 책임감을 바탕으로 긍정적인 모습을 보임.`,
+    `${subject} 학습 준비와 참여 태도가 안정적이며 자기 점검 습관이 향상됨.`,
+    `${subject} 활동에서 친구와 협력하며 학급 분위기를 따뜻하게 만드는 데 기여함.`,
+    `${subject} 수업 중 자신의 생각을 바르게 표현하고 타인의 의견을 귀담아들음.`,
+    `${subject} 활동을 통해 성실함과 자신감을 꾸준히 키워 가는 모습이 기대됨.`,
+  ]
+}
+
+const getAreaComments = (area: RecordArea, subject: Subject) => (
+  commentsByArea[area][subject] ?? createDefaultComments(area, subject)
+)
+
 export const subjectRecords: Record<RecordArea, Record<Subject, StudentRecord[]>> = areas.reduce((areaAcc, area) => {
   areaAcc[area] = subjects.reduce((subjectAcc, subject) => {
+    const areaComments = getAreaComments(area, subject)
     subjectAcc[subject] = names.map((name, index) => ({
       studentNo: index + 1,
       name,
-      comment: commentsByArea[area][subject][index],
+      comment: areaComments[index],
     }))
     return subjectAcc
   }, {} as Record<Subject, StudentRecord[]>)

@@ -1,4 +1,6 @@
 // Vercel 서버리스 함수: OpenAI 호출 대행 (키는 서버 환경변수에만 보관)
+const OPENAI_MODEL = 'gpt-5.4-nano'
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'POST만 허용됩니다.' })
@@ -25,7 +27,7 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4.1-mini',
+        model: OPENAI_MODEL,
         input: prompt,
         temperature: 0.35,
         max_output_tokens: 220,
