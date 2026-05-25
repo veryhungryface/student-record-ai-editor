@@ -632,7 +632,7 @@ function App() {
     try {
       runtime.sendMessage(
         NEISSHOT_EXT_ID,
-        { type: 'NEISSHOT_DATA', category, rows: payload },
+        { type: 'NEISSHOT_DATA', category, subject: activeSubject, rows: payload },
         (response) => {
           // 확장 미설치/비활성 → lastError 발생
           if (getChrome()?.runtime?.lastError) {
