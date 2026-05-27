@@ -33,9 +33,9 @@ const areaLabels: Record<RecordArea, string> = {
 }
 
 // 나이스샷(by issamGPT) 확장 프로그램 ID — 하드코딩
-const NEISSHOT_EXT_ID = 'mkpejpjgopbnapcdblomgipgncbbncif'
+const NEISSHOT_EXT_ID = 'djghmmnianiappligjedndekaenalhje'
 // 확장 설치 페이지 URL (웹스토어 게시 후 입력 — 비어 있으면 안내 모달에 링크 버튼 미표시)
-const NEISSHOT_INSTALL_URL: string = 'https://chromewebstore.google.com/detail/%EB%82%98%EC%9D%B4%EC%8A%A4%EC%83%B7-bybae/hbldfcgjepjeggbfhbghigadegmgfgll?hl=ko&gl=UA'
+const NEISSHOT_INSTALL_URL: string = 'https://chromewebstore.google.com/detail/%EB%82%98%EC%9D%B4%EC%8A%A4%EC%9E%85%EB%A0%A5%EB%8F%84%EC%9A%B0%EB%AF%B8-by-issamgpt/djghmmnianiappligjedndekaenalhje?hl=ko&authuser=1'
 
 // 사이트 기재 영역 → 확장 카테고리 코드 (사이드패널 미리보기 제목에 사용됨)
 const areaToCategory: Record<RecordArea, string> = {
